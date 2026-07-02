@@ -1,3 +1,4 @@
+**HELPFUL note**: IF you are using this on bun related projects, there might be components in them that have been shipped as binaries (with sse4.2 req) and those components would too need to be rebuilt by you. while this might be obvious this note might help some people.
 # bun-no-sse4.2
 
 A custom **Bun v1.4.0** build for x86_64 Linux CPUs **without SSE4.2 / SSE4.1 / SSSE3 / AVX** — e.g. AMD Athlon II X4, Phenom, Opteron K10, and similar pre-2008 microarchitectures.
