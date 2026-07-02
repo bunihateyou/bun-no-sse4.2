@@ -103,25 +103,28 @@ jobs:
           ninja -C build/release bun-profile
           ls -lh build/release/bun-profile
 
-      - name: Strip, bundle ICU 74 libs, patchelf rpath, verify
+      - name: Strip, bundle ICU 74 libs, wrapper, verify
         run: |
           set -e
           mkdir -p /tmp/bun-dist/lib
           cp /tmp/bun/build/release/bun-profile /tmp/bun-dist/bun-barcelona
           strip /tmp/bun-dist/bun-barcelona || true
           # Bun's local-WebKit links system ICU (Ubuntu 24.04 = ICU 74) dynamically.
-          # Bundle the runner's ICU 74 libs next to the binary and set rpath=$ORIGIN/lib
-          # so it's portable to distros with different ICU versions (e.g. Void ICU 78).
-          sudo apt-get install -y patchelf
+          # Bundle the runner's ICU 74 libs + a wrapper that sets LD_LIBRARY_PATH.
+          # (patchelf --set-rpath segfaults Bun's binary at runtime — Bun appends
+          # data past the ELF that patchelf corrupts. LD_LIBRARY_PATH avoids touching it.)
           cp -L /usr/lib/x86_64-linux-gnu/libicui18n.so.74 /tmp/bun-dist/lib/
           cp -L /usr/lib/x86_64-linux-gnu/libicuuc.so.74   /tmp/bun-dist/lib/
           cp -L /usr/lib/x86_64-linux-gnu/libicudata.so.74 /tmp/bun-dist/lib/
-          patchelf --set-rpath '$ORIGIN/lib' /tmp/bun-dist/bun-barcelona
-          # sanity test on runner (has SSE4.2, but proves rpath+ICU linkage works)
+          printf '%s\n' '#!/bin/sh' \
+            'DIR=$(cd "$(dirname "$0")" && pwd)' \
+            'export LD_LIBRARY_PATH="$DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"' \
+            'exec "$DIR/bun-barcelona" "$@"' > /tmp/bun-dist/bun
+          chmod +x /tmp/bun-dist/bun
+          # sanity test via wrapper (sets LD_LIBRARY_PATH internally)
           cd /tmp/bun-dist
-          ./bun-barcelona --version
-          ./bun-barcelona -e "console.log(42)"
-          ls -lhR /tmp/bun-dist
+          ./bun --version
+          ./bun -e "console.log(42)"
 
       - name: Upload binary + ICU libs
         uses: actions/upload-artifact@v4
