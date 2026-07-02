@@ -1,15 +1,15 @@
-**HELPFUL note**: Programs built on top of Bun (e.g. `omp`, `claude-code`) ship their own prebuilt SSE4.2 binaries that also need rebuilding. Full instructions for those are in the companion repo → [`bunihateyou/run-without-sse4.2`](https://github.com/bunihateyou/run-without-sse4.2).
+**HELPFUL note**: Programs built on top of Bun (omp, claude-code) ship their own prebuilt SSE4.2 binaries too. Instructions: [`bunihateyou/run-without-sse4.2`](https://github.com/bunihateyou/run-without-sse4.2).
 # bun-no-sse4.2
 
-A custom **Bun v1.4.0** build for x86_64 Linux CPUs **without SSE4.2 / SSE4.1 / SSSE3 / AVX** — e.g. AMD Athlon II X4, Phenom, Opteron K10, and similar pre-2008 microarchitectures.
+A custom **Bun v1.4.0** build for x86_64 Linux CPUs **without SSE4.2 / SSE4.1 / SSSE3 / AVX** - e.g. AMD Athlon II X4, Phenom, Opteron K10, and similar pre-2008 microarchitectures.
 
-Stock Bun ships a prebuilt WebKit/JavaScriptCore compiled at `-march=nehalem`, which emits `pcmpgtq` (SSE4.1) and `pshufb` (SSSE3) on JSC interpreter hot paths. On a K10-class CPU these trigger `SIGILL` (exit 132) the moment any JavaScript is evaluated — `bun -e "console.log(1)"` crashes. This build fixes that.
+Stock Bun ships a prebuilt WebKit/JavaScriptCore compiled at `-march=nehalem`, which emits `pcmpgtq` (SSE4.1) and `pshufb` (SSSE3) on JSC interpreter hot paths. On a K10-class CPU these trigger `SIGILL` (exit 132) the moment any JavaScript is evaluated - `bun -e "console.log(1)"` crashes. This build fixes that.
 
 ## What this build does differently
 
 1. **`-march=barcelona`** (K10 baseline: SSE3, no SSE4.x/SSSE3/AVX) patched into [`scripts/build/flags.ts`](scripts/build/flags.ts) (C/C++ codegen) and [`scripts/build/rust.ts`](scripts/build/rust.ts) (Rust crates, `-Ctarget-cpu=barcelona`).
-2. **WebKit built locally** (`--webkit=local`) instead of linking the prebuilt `-march=nehalem` `libJavaScriptCore.a` blob — JSC's hot paths are now SSE3-only.
-3. **ICU 74 libs bundled** + an `LD_LIBRARY_PATH` wrapper, so the binary runs on distros whose system ICU differs from Ubuntu 24.04's (e.g. Void with ICU 78). `patchelf` is deliberately avoided — it segfaults Bun's non-standard ELF layout at runtime.
+2. **WebKit built locally** (`--webkit=local`) instead of linking the prebuilt `-march=nehalem` `libJavaScriptCore.a` blob - JSC's hot paths are now SSE3-only.
+3. **ICU 74 libs bundled** + an `LD_LIBRARY_PATH` wrapper, so the binary runs on distros whose system ICU differs from Ubuntu 24.04's (e.g. Void with ICU 78). `patchelf` is deliberately avoided - it segfaults Bun's non-standard ELF layout at runtime.
 
 ## Download & Install
 
@@ -28,14 +28,14 @@ tar xzf bun-barcelona-linux-x64.tar.gz -C ~/.bun-barcelona
 
 ### Put `bun` on your PATH
 
-The tarball ships a `bun` wrapper script that resolves its own location (follows symlinks) and sets `LD_LIBRARY_PATH` to the bundled `lib/` before exec'ing the real binary. Symlink it into a PATH dir:
+Symlink the wrapper into a PATH dir. It sets `LD_LIBRARY_PATH` for the bundled ICU libs:
 
 ```sh
 ln -sf ~/.bun-barcelona/bun ~/.local/bin/bun   # or /usr/local/bin/bun
 bun --version
 ```
 
-> **Always call `bun` (the wrapper), never `bun-barcelona` directly** — the wrapper is what makes the bundled ICU 74 libs load. Calling the raw binary will fail with `libicui18n.so.74: cannot open shared object file` on distros without ICU 74.
+> Call `bun` (the wrapper), not `bun-barcelona` - the latter won't find the bundled ICU libs.
 
 ### Verify it works on your CPU
 
@@ -64,7 +64,7 @@ The GitHub Actions workflow at [`.github/workflows/build.yml`](.github/workflows
 
 1. Installs clang-21 + ninja + Rust nightly (pinned by Bun) + a bootstrap Bun
 2. Clones `oven-sh/bun` and applies the two `-march=barcelona` patches via `sed`
-3. Clones `oven-sh/WebKit` (blobless, pinned commit `c9ad5813…`) — the local WebKit build inherits `-march=barcelona`
+3. Clones `oven-sh/WebKit` (blobless, pinned commit `c9ad5813…`) - the local WebKit build inherits `-march=barcelona`
 4. Configures with `--webkit=local --baseline=true` and builds with ninja
 5. Strips the binary, bundles ICU 74 libs + wrapper, uploads as an artifact
 
@@ -83,20 +83,18 @@ git clone https://github.com/bunihateyou/bun-no-sse4.2.git && cd bun-no-sse4.2
 The two source patches (apply to a fresh `oven-sh/bun` clone):
 
 ```diff
-# scripts/build/flags.ts  — C/C++ codegen target
+# scripts/build/flags.ts  - C/C++ codegen target
 -"-march=nehalem"
 +"-march=barcelona"
 
-# scripts/build/rust.ts  — Rust crate target (baseline ternary)
+# scripts/build/rust.ts  - Rust crate target (baseline ternary)
 -? "nehalem"
 +? "barcelona"
 ```
 
 ## Running programs without SSE4.2
 
-The Bun binary alone isn't always enough — programs built *on top of* Bun (e.g. `omp`, `claude-code`) ship their own prebuilt SSE4.2 binaries that need separate rebuilding. Full instructions have moved to the companion repo:
-
-→ **[`bunihateyou/run-without-sse4.2`](https://github.com/bunihateyou/run-without-sse4.2)**
+Programs built on top of Bun (omp, claude-code) ship their own prebuilt SSE4.2 binaries too - [`bunihateyou/run-without-sse4.2`](https://github.com/bunihateyou/run-without-sse4.2)
 
 ## Why not just use QEMU?
 
@@ -104,4 +102,4 @@ You can run stock Bun under `qemu-x86_64 -cpu max`, but TCG emulation is ~10-20x
 
 ## License
 
-Bun is MIT-licensed. WebKit is BSD/LGPL. This repo contains only the build workflow + README — no Bun source. Download the binary from [Releases](../../releases).
+Bun is MIT-licensed. WebKit is BSD/LGPL. This repo contains only the build workflow + README - no Bun source. Download the binary from [Releases](../../releases).
