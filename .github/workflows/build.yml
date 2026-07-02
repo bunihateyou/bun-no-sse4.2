@@ -18,9 +18,9 @@ jobs:
                       /usr/local/share/boost /usr/local/.ghcup /opt/hostedtoolcache
           sudo apt-get clean
           sudo apt-get autoremove -y
-          # 4GB swap file to absorb the final link memory spike
+          sudo rm -f /swapfile
           sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
-          sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+          sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile || true
           df -h /
           free -h
 
