@@ -1,0 +1,122 @@
+name: Build Bun (barcelona, no SSE4.2)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Free disk space (aggressive)
+        run: |
+          # ubuntu-latest: 4-core, 16GB RAM, 14GB SSD. WebKit+Bun needs ~14GB.
+          # Reclaim everything we don't need; add swap for the link step.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /usr/local/.ghcup /opt/hostedtoolcache
+          sudo apt-get clean
+          sudo apt-get autoremove -y
+          # 4GB swap file to absorb the final link memory spike
+          sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+          sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+          df -h /
+          free -h
+
+      - name: Install clang-21, ninja, deps
+        run: |
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 21 noble
+          sudo apt-get install -y --no-install-recommends \
+            clang-21 lld-21 llvm-21-dev ninja-build cmake \
+            libssl-dev liblz4-dev libzstd-dev libicu-dev \
+            g++-14 libstdc++-14-dev
+          # symlink clang-21 to front
+          sudo ln -sf /usr/bin/clang-21 /usr/local/bin/clang
+          sudo ln -sf /usr/bin/clang++-21 /usr/local/bin/clang++
+          clang --version | head -1
+          # enable 2-core ninja parallelism to fit RAM
+          echo "nproc=$(nproc)"
+
+      - name: Install Rust nightly (pinned by bun)
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+            --default-toolchain nightly-2026-05-06 --profile minimal \
+            --component rust-src,rustfmt,clippy,llvm-tools \
+            --target x86_64-unknown-linux-gnu
+          source $HOME/.cargo/env
+          rustc --version
+
+      - name: Install bootstrap Bun
+        run: |
+          curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.0"
+          echo "$HOME/.bun/bin" >> $GITHUB_PATH
+
+      - name: Clone bun source
+        run: |
+          git clone --depth 1 https://github.com/oven-sh/bun.git /tmp/bun
+          cd /tmp/bun
+          git rev-parse --short HEAD
+
+      - name: Apply barcelona patches
+        run: |
+          cd /tmp/bun
+          # Patch 1: C/C++ codegen target. flags.ts: -march=nehalem -> barcelona
+          sed -i 's/"-march=nehalem"/"-march=barcelona"/' scripts/build/flags.ts
+          # Patch 2: Rust crates target-cpu. rust.ts: "nehalem" -> "barcelona"
+          sed -i 's/? "nehalem"/? "barcelona"/' scripts/build/rust.ts
+          echo "=== verify patches ==="
+          grep -n "barcelona" scripts/build/flags.ts scripts/build/rust.ts
+
+      - name: Clone WebKit (local build, inherits -march=barcelona)
+        run: |
+          # Bun's WEBKIT_VERSION pins a commit; clone the fork and fetch it.
+          git clone --filter=blob:none --no-checkout https://github.com/oven-sh/WebKit.git /tmp/WebKit
+          cd /tmp/WebKit
+          # WebKit version pinned in bun's scripts/build/deps/webkit.ts
+          WK_SHA=$(grep -oE 'WEBKIT_VERSION = "[0-9a-f]{40}"' /tmp/bun/scripts/build/deps/webkit.ts | grep -oE '[0-9a-f]{40}')
+          echo "WebKit pinned SHA: $WK_SHA"
+          git fetch --depth 1 origin "$WK_SHA"
+          git checkout FETCH_HEAD
+          git log --oneline -1
+
+      - name: Configure (release, baseline=barcelona, local WebKit)
+        run: |
+          cd /tmp/bun
+          source $HOME/.cargo/env
+          export PATH="/usr/lib/llvm-21/bin:$HOME/.bun/bin:$HOME/.cargo/bin:$PATH"
+          export RUSTUP_TOOLCHAIN=nightly-2026-05-06
+          export CC=/usr/lib/llvm-21/bin/clang
+          export CXX=/usr/lib/llvm-21/bin/clang++
+          export BUN_WEBKIT_PATH=/tmp/WebKit
+          bun scripts/build.ts --profile=release --baseline=true --webkit=local --configure-only --cacheDir=/tmp/bc
+          echo "=== verify march in build.ninja ==="
+          grep -m2 "march=barcelona" build/release/build.ninja
+          grep -m2 "target-cpu=barcelona" build/release/build.ninja
+
+      - name: Build
+        run: |
+          cd /tmp/bun
+          source $HOME/.cargo/env
+          export PATH="/usr/lib/llvm-21/bin:$HOME/.bun/bin:$HOME/.cargo/bin:$PATH"
+          export RUSTUP_TOOLCHAIN=nightly-2026-05-06
+          export CC=/usr/lib/llvm-21/bin/clang
+          export CXX=/usr/lib/llvm-21/bin/clang++
+          ninja -C build/release bun-profile
+          ls -lh build/release/bun-profile
+
+      - name: Strip & verify on runner (SSE4.2 CPU — sanity only)
+        run: |
+          cp /tmp/bun/build/release/bun-profile /tmp/bun-barcelona
+          strip /tmp/bun-barcelona || true
+          ls -lh /tmp/bun-barcelona
+          /tmp/bun-barcelona --version
+          /tmp/bun-barcelona -e "console.log(42)"
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: bun-barcelona
+          path: /tmp/bun-barcelona
+          retention-days: 30
+          compression-level: 0
