@@ -92,6 +92,35 @@ The two source patches (apply to a fresh `oven-sh/bun` clone):
 +? "barcelona"
 ```
 
+## Running `omp` (oh-my-pi) on a no-SSE4.2 CPU
+
+Getting Bun running is necessary but **not sufficient** for `omp`. The `@oh-my-pi/pi-coding-agent` package depends on `@oh-my-pi/pi-natives`, a Rust/N-API native addon shipped as a prebuilt `.node` binary. Even the `"baseline"` variant (`pi_natives.linux-x64-baseline.node`, ~130 MB) is compiled at `target-cpu=x86-64-v2` (SSE4.1/SSSE3) and contains `pcmpgtq` + `pshufb` on default code paths → `SIGILL` on K10 when `process.dlopen` loads it.
+
+You must rebuild `pi-natives` from source at `target-cpu=barcelona` and replace the prebuilt `.node`:
+
+```sh
+# on the target machine (or cross-build on a SSE4.2 host)
+git clone --depth 1 https://github.com/can1357/oh-my-pi.git /tmp/oh-my-pi
+cd /tmp/oh-my-pi
+
+# RUSTFLAGS here OVERRIDES omp's build script (which would set x86-64-v2/v3).
+# The script only sets RUSTFLAGS when it's unset, so pre-setting it wins.
+RUSTFLAGS="-C target-cpu=barcelona" cargo build --release -p pi-natives
+
+# the output is a cdylib: libpi_natives.so
+# rename + replace every baseline .node in the global install
+cp target/release/libpi_natives.so \
+   ~/.bun/install/global/node_modules/@oh-my-pi/pi-natives-linux-x64/pi_natives.linux-x64-baseline.node
+# there are nested copies under each @oh-my-pi/* package — replace them all:
+find ~/.bun/install/global -name 'pi_natives.linux-x64-baseline.node' \
+  -exec cp target/release/libpi_natives.so {} \;
+```
+
+Notes:
+- The rebuilt `.node` still contains dispatched AVX2/SSSE3 SIMD (in image/sixel codecs) — these are behind runtime CPU-feature checks and never execute on K10. The non-dispatched `pcmpgtq`/`pshufb` that caused the SIGILL are gone.
+- **Update fragility:** running `omp update` or `bun install -g @oh-my-pi/pi-coding-agent` again will re-fetch the SSE4.1 `.node` from npm and clobber the barcelona build. Re-run the `cp` above after any update until omp ships a v1 (SSE2) or barcelona variant.
+- The `modern` variant (`.linux-x64-modern.node`) is not loaded on non-AVX2 CPUs (the loader's `detectHostAvx2Support()` picks `baseline`), so leaving it stock is fine.
+
 ## Why not just use QEMU?
 
 You can run stock Bun under `qemu-x86_64 -cpu max`, but TCG emulation is ~10-20x slower and uses A LOT OF CPU. This native build runs at full speed on K10 hardware.
