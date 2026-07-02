@@ -18,9 +18,8 @@ jobs:
                       /usr/local/share/boost /usr/local/.ghcup /opt/hostedtoolcache
           sudo apt-get clean
           sudo apt-get autoremove -y
-          sudo rm -f /swapfile
-          sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
-          sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile || true
+          (sudo swapoff /swapfile 2>/dev/null; sudo rm -f /swapfile 2>/dev/null; true)
+          (sudo fallocate -l 4G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096 2>/dev/null; sudo chmod 600 /swapfile 2>/dev/null; sudo mkswap /swapfile 2>/dev/null; sudo swapon /swapfile 2>/dev/null; true)
           df -h /
           free -h
 
