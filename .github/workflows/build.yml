@@ -48,9 +48,8 @@ jobs:
 
       - name: Install bootstrap Bun
         run: |
-          curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.0"
+          curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.14"
           echo "$HOME/.bun/bin" >> $GITHUB_PATH
-
       - name: Clone bun source
         run: |
           git clone --depth 1 https://github.com/oven-sh/bun.git /tmp/bun
