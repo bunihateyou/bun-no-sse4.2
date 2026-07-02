@@ -103,18 +103,33 @@ jobs:
           ninja -C build/release bun-profile
           ls -lh build/release/bun-profile
 
-      - name: Strip & verify on runner (SSE4.2 CPU — sanity only)
+      - name: Strip, bundle ICU 74 libs, patchelf rpath, verify
         run: |
+          set -e
           cp /tmp/bun/build/release/bun-profile /tmp/bun-barcelona
           strip /tmp/bun-barcelona || true
-          ls -lh /tmp/bun-barcelona
-          /tmp/bun-barcelona --version
-          /tmp/bun-barcelona -e "console.log(42)"
+          # Bun's local-WebKit links system ICU (Ubuntu 24.04 = ICU 74) dynamically.
+          # Bundle the runner's ICU 74 libs next to the binary and set rpath=$ORIGIN
+          # so it's portable to distros with different ICU versions (e.g. Void ICU 78).
+          sudo apt-get install -y patchelf
+          mkdir -p /tmp/bun-dist/lib
+          # ICU 74 libs from the runner (libicu-dev pulls runtime libs too)
+          cp -L /usr/lib/x86_64-linux-gnu/libicui18n.so.74 /tmp/bun-dist/lib/
+          cp -L /usr/lib/x86_64-linux-gnu/libicuuc.so.74   /tmp/bun-dist/lib/
+          cp -L /usr/lib/x86_64-linux-gnu/libicudata.so.74 /tmp/bun-dist/lib/
+          # set rpath so the binary finds bundled libs at $ORIGIN/lib
+          patchelf --set-rpath '$ORIGIN/lib' /tmp/bun-barcelona
+          # sanity test on runner (has SSE4.2, but proves rpath+ICU linkage works)
+          ./bun-barcelona --version
+          ./bun-barcelona -e "console.log(42)"
+          ls -lhR /tmp/bun-dist
 
-      - name: Upload binary
+      - name: Upload binary + ICU libs
         uses: actions/upload-artifact@v4
         with:
           name: bun-barcelona
-          path: /tmp/bun-barcelona
+          path: |
+            /tmp/bun-dist/
+            /tmp/bun-barcelona
           retention-days: 30
           compression-level: 0
